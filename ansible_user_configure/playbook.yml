@@ -1,0 +1,40 @@
+---
+- name: === Создание и настройка пользователя ansible ===
+  hosts: all
+  become: yes
+  vars:
+
+  tasks:
+
+    - name: === Создание пользователя ansible в Deb системах ===
+      ansible.builtin.user:
+        name: ansible
+        groups: sudo
+        append: yes
+        state: present
+        shell: /bin/bash
+      when: ansible_os_family == "Debian"
+
+    - name: === Создание пользователя ansible в RH системах ===
+      ansible.builtin.user:
+        name: ansible
+        groups: wheel
+        append: yes
+        state: present
+        shell: /bin/bash
+      when: ansible_os_family == "RedHat"
+
+    - name: === Передача открытого ssh ключа ===
+      ansible.posix.authorized_key:
+        user: ansible
+        key: "{{ lookup('file', '/home/ansible/.ssh/id_ed25519.pub') }}"
+
+    - name: === Разрешить пользователю ansible sudo без пароля ===
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/ansible
+        content: "ansible ALL=(ALL) NOPASSWD: ALL"
+        owner: 'root'
+        group: 'root'
+        mode: '0440'
+
+
