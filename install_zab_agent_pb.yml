@@ -1,0 +1,125 @@
+---
+- name: === Установка и настройка zabbix agent 2 ===
+  hosts: all
+  become: yes
+  vars:
+    inst_file: /tmp/zabbix-release.deb
+
+  tasks:
+
+    - name: === Проверить не скачан ли пакет ===
+      ansible.builtin.stat:
+        path: "{{ inst_file }}"
+      register: file_check
+
+    - name: === Скачать zabbix-release для Debian ===
+      ansible.builtin.get_url:
+        url: "https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-release/zabbix-release_latest_7.0+{{ ansible_distribution | lower }}{{ ansible_distribution_major_version }}_all.deb"
+        dest: "{{ inst_file }}"
+        mode: '0644'
+      when: 
+        - ansible_distribution == "Debian"
+        - not file_check.stat.exists
+         
+    - name: === Скачать zabbix-release для Ubuntu ===
+      ansible.builtin.get_url:
+        url: "https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.0+{{ ansible_distribution | lower }}{{ ansible_distribution_version }}_all.deb"
+        dest: "{{ inst_file }}"
+        mode: '0644'
+      when: 
+        - ansible_distribution == "Ubuntu"
+        - not file_check.stat.exists
+
+    - name: === Добавление zabbix репозитория ===
+      ansible.builtin.apt:
+        deb: "{{ inst_file }}"
+
+    - name: === Обновление кэша apt ===
+      ansible.builtin.apt:
+        update_cache: yes
+      failed_when: false
+
+    - name: === Установка zabbix-agent2 ===
+      ansible.builtin.apt:
+        name: 
+          - zabbix-agent2
+          - zabbix-agent2-plugin*
+        state: present
+      notify: restart zabbix agent
+
+    - name: === Копирование конфига zabbix-agent2 ===
+      ansible.builtin.template:
+        src: zabbix_agent2.conf.j2
+        dest: /etc/zabbix/zabbix_agent2.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart zabbix agent
+
+    - name: === Проверка активности iptables ===
+      ansible.builtin.shell: systemctl is-active iptables
+      register: iptbl_result
+      failed_when: false
+      changed_when: false
+
+    - name: === Проверка активности nftables ===
+      ansible.builtin.shell: systemctl is-active nftables
+      register: nft_result
+      failed_when: false
+      changed_when: false
+
+    - name: === Проверка активности ufw ===
+      ansible.builtin.shell: systemctl is-active ufw
+      register: ufw_result
+      failed_when: false
+      changed_when: false
+
+    
+    - name: === Правило для iptables ===
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 10050
+        jump: ACCEPT
+      when: iptbl_result.stdout == "active"
+      notify: save iptables rule
+
+    - name: === Проверка правила 10050 для  nftables ===
+      ansible.builtin.shell: nft list ruleset | grep -q "tcp dport 10050"
+      register: nft_check
+      failed_when: false
+      changed_when: false
+      when: nft_result.stdout == "active"
+
+    - name: === Добавление правила nft ===
+      ansible.builtin.shell: nft add rule inet filter input ip saddr 192.168.2.30 tcp dport 10050 accept 
+      when: nft_result.stdout == "active" and nft_check.rc != 0
+      notify: save nft rule
+      register: nft_arule
+  
+
+    - name: === Правило для ufw ===
+      ansible.builtin.ufw:
+        rule: allow
+        src: 192.168.2.30
+        port: 10050
+      when: ufw_result.stdout == "active"
+
+        
+  handlers:
+
+    - name: restart zabbix agent
+      ansible.builtin.service:
+        name: zabbix-agent2
+        state: restarted
+        enabled: yes
+
+    - name: save iptables rule
+      community.general.iptables_state:
+        path: /etc/iptables/rules.v4
+        state: saved
+
+    - name: save nft rule
+      ansible.builtin.shell: nft list ruleset | tee /etc/nftables.conf
+
+
