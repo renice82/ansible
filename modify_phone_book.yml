@@ -1,0 +1,81 @@
+---
+- name: Изменения данных в справочнике телефонов        #<Unit Name="Фамилия Имя Отчество" Phone1="3124"/>
+  hosts: phone-book
+  become: yes
+  vars:
+    fpath: "/var/www/html/info.phonebook/Yealink_Phonebook.xml.bak"
+  vars_prompt:
+    - name: "chois_action"
+      prompt: "Введите C если заменить владельца номера, NA - если добавить абонента головной, NS - добавить абонента дочерней"
+      private: no
+  
+  tasks:
+    
+    - name: === Завершение если не введены данные  ===
+      ansible.builtin.assert:
+        that: 
+          - chois_action in ["C", "NA", "NS"]
+        fail_msg: "Данные не введены или введены некорректно"
+
+                                                                                           # Замена владельца номера
+    - name: === Запрос ввода телефона для смены владельца ===
+      ansible.builtin.pause:
+        prompt: "Введите номер для смены владельца: "
+      register: chow_num
+      when: chois_action == "C"
+
+    - name: === Запроос ввода имени нового владельца ===
+      ansible.builtin.pause:
+        prompt: "Введите ФИО владельца: "
+      register: chow_user
+      when: chois_action == "C"
+
+    - name: === Замена владельца в файле ===
+      ansible.builtin.lineinfile:
+        path: "{{ fpath }}"
+        regexp: "{{ chow_num.user_input }}"
+        line: '<Unit Name="{{ chow_user.user_input }}" Phone1="{{ chow_num.user_input }}"/>'
+      when: chois_action == "C" and chow_num.user_input | length > 0 and chow_user.user_input | length > 0
+
+                                                                                           # Добавление нового абонента в головную
+    - name: === Запрос ввода телефона для нового обонента головной ===
+      ansible.builtin.pause:
+        prompt: "Введите новый номер телефона: "
+      register: new_num_main
+      when: chois_action == "NA"
+
+    - name: === Запрос ввода ФИО для нового абонента головной ===
+      ansible.builtin.pause:
+        prompt: "Введите ФИО нового обонента: "
+      register: new_user_main
+      when: chois_action == "NA"
+
+    - name: === Добавление нового абонента головной ===
+      ansible.builtin.lineinfile:
+        path: "{{ fpath }}"
+        insertafter: '<Menu Name="АМКК">'
+        line: '<Unit Name="{{ new_user_main.user_input }}" Phone1="{{ new_num_main.user_input }}"/>'
+      when: chois_action == "NA" and new_num_main.user_input | trim | length > 0 and new_user_main.user_input | trim | length > 0
+
+                                                                                             # Добавление нового абонента в дочернюю
+
+    - name: === Запрос ввода телефона для нового абонента дочерней ===
+      ansible.builtin.pause:
+        prompt: "Введите новый номер телефона: "
+      register: new_num_child
+      when: chois_action == "NS"
+
+    - name: === Запрос ввода ФИО для нового абонента дочерней ===
+      ansible.builtin.pause:
+        prompt: "Введите ФИО нового обонента: "
+      register: new_user_child
+      when: chois_action == "NS"
+
+    - name: === Добавление нового абонента дочереней ===
+      ansible.builtin.lineinfile:
+        path: "{{ fpath }}"
+        insertafter: '<Menu Name="Советское">'
+        line: '<Unit Name="{{ new_user_child.user_input }}" Phone1="{{ new_num_child.user_input }}"/>'
+      when: chois_action == "NS" and new_num_child.user_input | trim | length > 0 and new_user_child.user_input | trim | length > 0
+
+    
